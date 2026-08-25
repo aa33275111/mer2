@@ -1,0 +1,33 @@
+# ===== 模型权重 (体积大, 不提交) =====
+models/
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.gguf
+*.ckpt
+
+# ===== 训练输出 / 缓存 (每次重跑都会重新生成) =====
+output/
+cache/
+
+# ===== 压缩包 / 原始数据 =====
+*.7z
+*.zip
+*.tar
+*.gz
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# ===== 日志 (训练日志在 output/ 下, 结果日志保留在 result/) =====
+# 注意: result/v{xxx}/logs/ 下的过程记录是保留的, 这里不忽略 *.log
