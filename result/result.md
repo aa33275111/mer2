@@ -128,8 +128,8 @@ cd /root/MER2026_Track2
 # 1) 9:1 划分 human 数据 (只需一次)
 python result/scripts/split_human_data.py
 
-# 2) 训练 SFT (MC+ 全量)
-CUDA_VISIBLE_DEVICES=0 python -u train.py \
+# 2) 训练 SFT (MC+ 去重后全量; 4 卡 A100, 与历史配置一致)
+torchrun --nproc_per_node=4 --master_port=29500 train.py \
   --cfg-path=train_configs/mercaptionplus_outputhybird_bestsetup_bestfusion_face_lz.yaml
 
 # 3) 推理 (生成 reason, 保存到 output/results-mer2026ov/)

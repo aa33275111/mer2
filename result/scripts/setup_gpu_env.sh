@@ -55,10 +55,10 @@ cat <<'EOT'
 接下来:
 1) 改 config.py 的 DATA_DIR['MER2026'] 指向 GPU 机上数据集路径
 2) 确认 models/ 已就位 (Qwen2.5-7B-Instruct / chinese-hubert-large / clip-vit-large-patch14 / bert-base-uncased)
-3) 先跑通 SFT:
-   CUDA_VISIBLE_DEVICES=0 python -u train.py \
+3) 先跑通 SFT (4 卡 A100, 与历史配置 4GPU×3batch 一致):
+   torchrun --nproc_per_node=4 --master_port=29500 train.py \
      --cfg-path=train_configs/mercaptionplus_outputhybird_bestsetup_bestfusion_face_lz.yaml
-4) 然后 GRPO:
+4) 然后 GRPO (单卡):
    CUDA_VISIBLE_DEVICES=0 python -u grpo/train_grpo.py \
      --cfg-path=train_configs/grpo_human_ewf1.yaml
 5) 评测流程见 my_affectgpt/evaluation/evaluation.md

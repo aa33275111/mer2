@@ -130,18 +130,24 @@ class GRPOTrainer:
             'face_or_frame': self.dataset.face_or_frame,
             **self._feature_dict(feats, n),
         }
-        with torch.no_grad():
-            embeds = self.policy.prepare_inputs_embeds(samples)
-            gen = self.policy.llama_model.generate(
-                inputs_embeds=embeds,
-                attention_mask=attn.to(self.device),
-                max_new_tokens=self.max_new_tokens,
-                do_sample=True,
-                temperature=self.temperature,
-                top_p=0.9,
-                repetition_penalty=1.05,
-                pad_token_id=self.tokenizer.pad_token_id,
-            )
+        was_training = self.policy.training
+        self.policy.eval()  # 采样时关掉 LoRA dropout, 避免污染
+        try:
+            with torch.no_grad():
+                embeds = self.policy.prepare_inputs_embeds(samples)
+                gen = self.policy.llama_model.generate(
+                    inputs_embeds=embeds,
+                    attention_mask=attn.to(self.device),
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=True,
+                    temperature=self.temperature,
+                    top_p=0.9,
+                    repetition_penalty=1.05,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                )
+        finally:
+            if was_training:
+                self.policy.train()
         texts, resp_ids = [], []
         for row in gen:
             rids = row[len(prompt_ids):]
