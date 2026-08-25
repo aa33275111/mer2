@@ -397,8 +397,13 @@ class RunnerBase:
                 train_stats = self.train_epoch(cur_epoch)
                 self.log_stats(split_name="train", stats=train_stats)
 
-            # evaluation phase
-            if len(self.valid_splits) > 0:
+            # 每轮都保存 checkpoint (不覆盖, 保留全部 epoch 权重)
+            if not self.evaluate_only:
+                self._save_checkpoint(cur_epoch, train_stats, is_best=False)
+
+            # evaluation phase: 每 eval_interval 轮做一次生成式 EW-F1 验证, 选最优
+            eval_interval = self.config.run_cfg.get("eval_interval", 1)
+            if len(self.valid_splits) > 0 and cur_epoch % eval_interval == 0:
                 for split_name in self.valid_splits:
                     logging.info("Evaluating on {}.".format(split_name))
 
@@ -419,11 +424,6 @@ class RunnerBase:
 
                             val_log.update({"best_epoch": best_epoch})
                             self.log_stats(val_log, split_name)
-
-            else:
-                # if no validation split is provided, we just save the checkpoint at the end of each epoch.
-                if not self.evaluate_only:
-                    self._save_checkpoint(cur_epoch, train_stats, is_best=False)
 
             if self.evaluate_only:
                 break

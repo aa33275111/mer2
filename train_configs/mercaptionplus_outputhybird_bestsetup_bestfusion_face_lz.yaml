@@ -83,7 +83,8 @@ run:
 
   evaluate: False
   train_splits: ["train"]
-  valid_splits: ["val"] # 2026-08-25: mc+ 划出的 300 条验证集, 按 val loss 选最优 epoch
+  valid_splits: ["val"]    # 2026-08-25: mc+ 划出的 300 条验证集
+  eval_interval: 5         # 每 5 轮做一次生成式 EW-F1 验证, 按 EW-F1 选最优 epoch
 
   device: "cuda" 
   world_size: 1

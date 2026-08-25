@@ -115,3 +115,9 @@ DEFAULT_FRAME_PATCH_TOKEN = '<FrameHere>'
 DEFAULT_FACE_PATCH_TOKEN  = '<FaceHere>'
 DEFAULT_MULTI_PATCH_TOKEN = '<MultiHere>'
 IGNORE_INDEX = -100
+
+#######################
+## 验证配置 (2026-08-25)
+#######################
+EVAL_INTERVAL = 5        # SFT 每几轮做一次生成式 EW-F1 验证 (yaml run.eval_interval 优先)
+EVAL_N_SAMPLES = 200     # 验证采样条数 (控制生成耗时)

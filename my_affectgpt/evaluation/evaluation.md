@@ -56,7 +56,9 @@ test10 残留重叠为 0。
 | LoRA-SFT | `track2_train_mercaptionplus_train.csv` (≈30,976) | `track2_train_mercaptionplus_val.csv` (300) | `track2_train_human_test10.csv` (≈153) |
 | GRPO | `track2_train_human_train90.csv` (≈1,379) | 训练中在 test10 采样算 EW-F1 | `track2_train_human_test10.csv` (≈153) |
 
-> SFT 训练时按 **验证集 CE loss** 选最优 epoch(yaml `valid_splits: ["val"]`,runner 存 `checkpoint_best.pth`);
+> SFT 训练时每 `eval_interval`(默认 5)轮做一次**生成式 EW-F1 验证**(在验证集上生成标签,
+> 用 `grpo/rewards.compute_pair_scores` 算 EW-F1),按 **EW-F1 选最优 epoch**(yaml `valid_splits: ["val"]` + `eval_interval: 5`,
+> runner 存 `checkpoint_best.pth`);每轮权重都保留(`checkpoint_{epoch}_loss_{loss}.pth`,不覆盖)。
 > 最终报告指标仍是 test10 的 EW-F1。GRPO 训练中 `train_grpo.py` 每 `--eval-every` 步在 test10 上算 EW-F1。
 >
 > 测试时把 `config.py` 中 `PATH_TO_LABEL['MER2026OV']` 指向 `track2_train_human_test10.csv`
