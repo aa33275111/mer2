@@ -58,9 +58,23 @@ v{序号}_{阶段}_{数据}_{变体}
 
 | 版本 | 阶段 | 训练数据 | 方法要点 | 测试集 | **EW-F1 (level1)** | EW-F1 (level2) | P / R | 备注 |
 |---|---|---|---|---|---|---|---|---|
-| `v1_sft_mcplus_attention` | SFT | MC+ 全量 | AffectGPT + LoRA-SFT,audio+video+face+text,attention 融合 | human 10% | 待跑 | 待跑 | 待跑 | 简历历史值参照:61.3% |
-| `v2_grpo_human_ewf1` | GRPO | human 90% | 在 v1 上 GRPO,EW-F1 奖励 | human 10% | 待跑 | 待跑 | 待跑 | 简历历史值参照:62.1% |
-| `v2_grpo_human_pr` | GRPO | human 90% | 在 v1 上 GRPO,Precision/Recall 约束奖励 | human 10% | 待跑 | 待跑 | 待跑 | 与 ewf1 版对比 |
+| `v1_sft_mcplus_attention` | SFT | mc+ dedup (31,276) | AffectGPT + LoRA-SFT,音频+人脸(无文本),attention 融合 | human 10% | 待跑 | 待跑 | 待跑 | 对应历史 SFT 配置 → 61.3% |
+| `v2_grpo_human_ewf1` | GRPO | human 90% | 在 v1 上 GRPO,EW_F1 奖励 | human 10% | 待跑 | 待跑 | 待跑 | 对应历史 v7 配置 → 62.1% |
+| `v2_grpo_human_p3` | GRPO | human 90% | EW_F1 × P³ 奖励(惩罚低精度/过度预测) | human 10% | 待跑 | 待跑 | 待跑 | 对应历史 P3 配置 → 61.8% |
+
+### 3.1 历史实验参照(原代码删前记录,复现目标)
+
+> 用户 2026-08-25 提供的原始实验表。重跑以 **SFT 与 v7 GRPO 为第一版**复现目标,其余作为奖励策略对比实验。
+
+| 实验 | Reward | G | Temp | LR | Steps | Best EW-F1 |
+|---|---|---|---|---|---|---|
+| **SFT** | — | — | — | 1e-5 | — | **61.3** |
+| **v7** | **EW_F1** | 8 | **1.0** | **5e-7** | 500 | **62.1** |
+| EW+format | EW_F1 + 0.1·format | 8 | 0.7–1.1 | 8e-7 | 600 | 61.0 |
+| μ_F1 | 0.85·EW + 0.15·μ_F1 | 8 | 0.8–1.25 | — | — | 60.6 |
+| **P3** | **EW_F1 × P³** | 8 | **1.0** | **1e-6** | 1500 | **61.8** |
+
+奖励策略分析(面试可讲):v7(纯 EW_F1)最高 62.1;EW+format 反而降(0.1·format 干扰);μ_F1 略降(0.85/0.15 权重把 P/R 往中间拉);P3 用 P³ 强惩罚低精度(抑制过度预测),61.8 但更稳。→ 反映 GRPO 中 reward 设计对"预测偏置与 P/R 平衡"的敏感度。
 
 ---
 
@@ -69,21 +83,31 @@ v{序号}_{阶段}_{数据}_{变体}
 ### v1_sft_mcplus_attention — SFT 基线(MC+)
 
 - **状态**:待跑
-- **方法**:AffectGPT 多模态大模型,融合 HuBERT 音频 / CLIP 视频 / OpenFace 人脸 / 字幕文本,Q-Former 对齐到 Qwen2.5-7B,LoRA-SFT 用 MERCaption+ 全量指令微调
+- **方法**:AffectGPT 多模态大模型,融合 HuBERT 音频 / OpenFace 人脸(**无文本**),Q-Former 对齐到 Qwen2.5-7B,LoRA-SFT 用 mc+ 去重后全量指令微调
 - **子目录**:[`v1_sft_mcplus_attention/`](v1_sft_mcplus_attention/)
 - **复现命令**:
   ```bash
   CUDA_VISIBLE_DEVICES=0 python -u train.py \
     --cfg-path=train_configs/mercaptionplus_outputhybird_bestsetup_bestfusion_face_lz.yaml
   ```
-- **复现目标**:测试集 EW-F1 (level1) ≈ **61.3%**(简历历史值,作为对勾)
+- **复现目标**:测试集 EW-F1 (level1) ≈ **61.3%**(历史 SFT 配置:init_lr 1e-5,cosine)
 
-### v2_grpo_human_ewf1 — GRPO(EW-F1 奖励)
+### v2_grpo_human_ewf1 — GRPO(EW_F1 奖励,历史 v7 配置)
 
 - **状态**:待跑(依赖 v1)
-- **方法**:在 v1 SFT 基础上,用 human 90% 数据做 GRPO 强化学习,奖励函数 = 官方 EW-F1
-- **子目录**:待创建
-- **复现目标**:测试集 EW-F1 (level1) ≈ **62.1%**(简历历史值)
+- **方法**:在 v1 SFT 基础上,用 human 90% 数据 GRPO,奖励函数 = 官方 **EW_F1**
+- **超参(对应历史 v7)**:G=8、temperature=1.0、lr=5e-7、eps=0.1、grad_accum=4、500 steps
+- **入口**:`grpo/train_grpo.py --cfg-path=train_configs/grpo_human_ewf1.yaml --reward ewf1`
+- **子目录**:`v2_grpo_human_ewf1/`(已建)
+- **复现目标**:测试集 EW-F1 (level1) ≈ **62.1%**
+
+### v2_grpo_human_p3 — GRPO(EW_F1 × P³ 奖励,历史 P3 配置)
+
+- **状态**:待跑(依赖 v1)
+- **方法**:奖励 = EW_F1 × Precision³,强惩罚低精度(抑制过度预测)
+- **超参(对应历史 P3)**:G=8、temperature=1.0、lr=1e-6、1500 steps
+- **入口**:`grpo/train_grpo.py --cfg-path=train_configs/grpo_human_ewf1.yaml --reward p3 --lr 1e-6 --steps 1500`
+- **复现目标**:测试集 EW-F1 (level1) ≈ **61.8%**
 
 ### v2_grpo_human_pr — GRPO(Precision/Recall 约束奖励)
 

@@ -1,0 +1,67 @@
+## GRPO 第一版配置 (对齐历史 v7)
+## 用法: python -u grpo/train_grpo.py --cfg-path train_configs/grpo_human_ewf1.yaml \
+##        --sft-ckpt <SFT checkpoint> --reward ewf1 \
+##        --G 8 --temp 1.0 --lr 5e-7 --eps 0.1 --grad-accum 4 --max-steps 500
+## (模型/数据段与 SFT human 配置一致; 训练超参走命令行)
+
+model:
+  arch: affectgpt
+  model_type: pretrain_vicuna
+
+  # Audio Q-Former and Video Q-Former
+  frozen_video_proj: False
+  frozen_video_Qformer: False
+  frozen_audio_Qformer: False
+  frozen_audio_proj: False
+  frozen_multi_Qformer: False
+  frozen_multi_llama_proj: False
+  frozen_llm: False
+
+  multi_fusion_type: attention # attention/qformer
+  video_fusion_type: attention # qformer(default)/mean/attention
+  audio_fusion_type: attention # qformer(default)/mean/attention
+  image_fusion_type: mean       # token(default)/mean
+
+  # AffectGPT
+  ckpt:   ""
+  ckpt_2: ""
+
+  # Other pre-trained models
+  llama_model: "Qwen25"            # Vicuna
+  acoustic_encoder: "HUBERT_LARGE" # IMAGEBIND
+  visual_encoder: "CLIP_VIT_LARGE" # EVA_CLIP_G
+
+  num_audio_query_token: 1
+  num_video_query_token: 1
+  num_multi_query_token: 1
+  num_image_query_token: 1
+
+  max_length: 1024
+
+  vis_processor:
+    train:
+      name: "alpro_video_train"
+      n_frms: 8
+      image_size: 224
+  text_processor:
+    train:
+      name: "blip_caption"
+  img_processor:
+    train:
+      name: "blip2_image_train"
+      image_size: 224
+
+datasets:
+
+  human:
+    data_type: video
+    face_or_frame: 'multiface_audio_face' # 音频+人脸, 无文本模态 (subtitle 不参与)
+    label_type: 'ovlabel'
+
+run:
+  task: video_text_pretrain
+  seed: 42
+  device: "cuda"
+  world_size: 1
+  dist_url: "env://"
+  distributed: False
