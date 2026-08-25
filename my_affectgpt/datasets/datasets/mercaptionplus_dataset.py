@@ -24,8 +24,8 @@ import config
 # 要让模型同时支持audio, video, text三部分输入信息才行
 class MERCaptionPlus_Dataset(BaseDataset):
     def __init__(self, vis_processor=None, txt_processor=None, img_processor=None,
-                    dataset_cfg=None, model_cfg=None):
-        
+                    dataset_cfg=None, model_cfg=None, label_path=None):
+
         # filter 包含两部分，一个是merg_eng只包括文本；而的ov label也只包括 textonly 抽取的 ov 标签
         self.dataset = 'MERCaptionPlus'
         if dataset_cfg is not None:
@@ -35,9 +35,10 @@ class MERCaptionPlus_Dataset(BaseDataset):
             print (f'Read data type: ######{self.face_or_frame}######')
             self.needed_data = self.get_needed_data(self.face_or_frame)
             print (self.needed_data) # ['audio', 'frame', 'face']
-        
+
         ################# 直接手动指定所有信息的存储路径 #################
-        ov_path = config.PATH_TO_LABEL[self.dataset]
+        # 2026-08-25: 支持指定 label_path (训练用 train csv, 验证用 val csv)
+        ov_path = label_path if label_path is not None else config.PATH_TO_LABEL[self.dataset]
         name2openset = {}
         df = pd.read_csv(ov_path)
         for _, row in df.iterrows():

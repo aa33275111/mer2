@@ -51,11 +51,14 @@ test10 残留重叠为 0。
 
 ### 2.3 各阶段训练/测试数据速查
 
-| 阶段 | 训练数据 | 测试数据 |
-|---|---|---|
-| LoRA-SFT | `track2_train_mercaptionplus_dedup.csv` (31,276) | `track2_train_human_test10.csv` (≈153) |
-| GRPO | `track2_train_human_train90.csv` (≈1,379) | `track2_train_human_test10.csv` (≈153) |
+| 阶段 | 训练数据 | 验证数据(选最优 epoch) | 测试数据 |
+|---|---|---|---|
+| LoRA-SFT | `track2_train_mercaptionplus_train.csv` (≈30,976) | `track2_train_mercaptionplus_val.csv` (300) | `track2_train_human_test10.csv` (≈153) |
+| GRPO | `track2_train_human_train90.csv` (≈1,379) | 训练中在 test10 采样算 EW-F1 | `track2_train_human_test10.csv` (≈153) |
 
+> SFT 训练时按 **验证集 CE loss** 选最优 epoch(yaml `valid_splits: ["val"]`,runner 存 `checkpoint_best.pth`);
+> 最终报告指标仍是 test10 的 EW-F1。GRPO 训练中 `train_grpo.py` 每 `--eval-every` 步在 test10 上算 EW-F1。
+>
 > 测试时把 `config.py` 中 `PATH_TO_LABEL['MER2026OV']` 指向 `track2_train_human_test10.csv`
 > (该文件含 `openset` 字段,evaluation.py 读取它作为 ground-truth)。
 

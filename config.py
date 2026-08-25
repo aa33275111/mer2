@@ -94,9 +94,11 @@ PATH_TO_TRANSCRIPTIONS = {
 PATH_TO_LABEL = {
     ## GRPO 训练用 9:1 划出的 human 90% (1379 条); 全量在 track2_train_human.csv (1532 条)。
     'Human':          os.path.join(DATA_DIR['MER2026'], 'track2_train_human_train90.csv'),
-    ## SFT 训练用去重版 (剔除了与 test10 重叠的 51 条, 避免数据泄漏);
-    ## 原版全量在 track2_train_mercaptionplus.csv (31,327 条)。
-    'MERCaptionPlus': os.path.join(DATA_DIR['MER2026'], 'track2_train_mercaptionplus_dedup.csv'),
+    ## SFT 训练用: 去重(剔 test10 重叠 51 条)后, 再划出 300 条验证集;
+    ## 剩余 ≈30,976 条作为训练集, 验证集在 MERCaptionPlusVal。
+    'MERCaptionPlus': os.path.join(DATA_DIR['MER2026'], 'track2_train_mercaptionplus_train.csv'),
+    ## SFT 验证集 (从 mc+ 去重集划出 ~300 条, 见 result/scripts/split_mcplus_val.py)
+    'MERCaptionPlusVal': os.path.join(DATA_DIR['MER2026'], 'track2_train_mercaptionplus_val.csv'),
     ## 官方测试集 (20000 candidates, 无 openset 标签, 用于最终提交);
     ## 重跑开发期验证时, 改为指向 9:1 划出的 human 10% 测试集:
     ##   os.path.join(DATA_DIR['MER2026'], 'track2_train_human_test10.csv')

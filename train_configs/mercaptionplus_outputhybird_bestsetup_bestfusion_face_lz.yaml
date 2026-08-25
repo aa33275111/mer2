@@ -81,8 +81,9 @@ run:
   amp: True # auto mixed precision, multiplication (fp16), addition (fp32)
   resume_ckpt_path: null # continue training from resume_ckpt_path
 
-  evaluate: False 
+  evaluate: False
   train_splits: ["train"]
+  valid_splits: ["val"] # 2026-08-25: mc+ 划出的 300 条验证集, 按 val loss 选最优 epoch
 
   device: "cuda" 
   world_size: 1

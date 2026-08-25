@@ -40,10 +40,11 @@ v{序号}_{阶段}_{数据}_{变体}
 
 | 项目 | 规定 |
 |---|---|
-| **SFT 训练数据** | `track2_train_mercaptionplus_dedup.csv` (31,276 条,已剔除与测试集重叠的 51 条) |
+| **SFT 训练数据** | `track2_train_mercaptionplus_train.csv` (≈30,976 条,去重+划验证后) |
+| **SFT 验证集** | `track2_train_mercaptionplus_val.csv` (300 条,从 mc+ 去重集划出,用于选最优 epoch) |
 | **GRPO 训练数据** | `track2_train_human.csv` 的 90% (≈1,379 条) |
 | **测试集(统一)** | `track2_train_human.csv` 按 9:1 固定 seed 划出的 10% (≈153 条),SFT / GRPO 统一用它评测 |
-| **划分方式** | `result/scripts/split_human_data.py`(9:1,seed=42)+ `result/scripts/dedup_mcplus.py`(防泄漏) |
+| **划分方式** | `split_human_data.py`(9:1)→ `dedup_mcplus.py`(防泄漏)→ `split_mcplus_val.py`(mc+ 划 300 验证) |
 | **输入模态** | 音频(HuBERT)+ 人脸(OpenFace),**无文本/字幕** |
 | **主指标** | **EW-F1 (level1)**:5 个情感轮 level1 F1 的平均 |
 | **辅助指标** | EW-F1 (level2)、Precision / Recall |
