@@ -20,13 +20,14 @@
 | | 内容 |
 |---|---|
 | **输入** | `/root/fsas/AffectGPT_dataset/` 下 csv + 分组音视频/人脸 |
-| **脚本** | `result/scripts/split_human_data.py`(9:1 划分)、`result/scripts/dedup_mcplus.py`(剔除泄漏) |
-| **输出** | `track2_train_human_train90.csv`(**1,379** 条)、`track2_train_human_test10.csv`(**153** 条)、`track2_train_mercaptionplus_dedup.csv`(**31,276** 条) |
+| **脚本** | `split_human_data.py`(9:1 划 test)、`dedup_mcplus.py`(剔除泄漏)、`split_mcplus_val.py`(mc+ 划 300 验证) |
+| **输出** | `track2_train_human_train90.csv`(**1,379** 条)、`track2_train_human_test10.csv`(**153** 条)、`track2_train_mercaptionplus_train.csv`(**≈30,976** 条)、`track2_train_mercaptionplus_val.csv`(**300** 条) |
 
-数据流细节:
-- 原始人工标注 `track2_train_human.csv`(1,532)→ 按 seed=42 9:1 划分 → train90 / test10(无交集)
-- 原始 mc+ `track2_train_mercaptionplus.csv`(31,327)→ 剔除与 test10 重叠的 51 条 → dedup(31,276),消除 SFT 数据泄漏
-- **模态** = 音频 + 人脸(**无文本**,`face_or_frame: multiface_audio_face`);每组数据在 `*_7z/{group}/` 下完整自洽(已核验覆盖率 100%)
+数据流细节(协议见 [`evaluation.md`](evaluation.md)):
+- 原始人工标注 `track2_train_human.csv`(1,532)→ 按 seed=42 9:1 划分 → **train90(GRPO 用)** / **test10(统一测试集)**,无交集
+- 原始 mc+ `track2_train_mercaptionplus.csv`(31,327)→ 剔除与 test10 重叠的 51 条(dedup)→ 再划出 **300 条验证集** → 剩余 **≈30,976 条 SFT 训练集**
+- **模态** = 音频 + 人脸(**无文本**,`face_or_frame: multiface_audio_face`),融合用 **Q-Former**;每组数据在 `*_7z/{group}/` 下完整自洽(已核验覆盖率 100%)
+- **环境**:本机即 2×A100 80G,conda env **`mer2026`**(torch 2.1.2+cu121,详见 `setup_gpu_env.sh`);运行前设 `CUDA_HOME=$CONDA_PREFIX`
 
 ---
 
@@ -51,6 +52,8 @@
 > prompt 模板(`get_prompt_for_multimodal` 的 `multiface_audio_face` 分支):
 > `###Human: The audio and video merged info is: <Multi><MultiHere></Multi>. The audio content is as follows: <Audio><AudioHere></Audio>. Meanwhile, we uniformly sample raw frames from the video and extract faces from these frames: <Video><FaceHere></Video>. Now, please answer my question based on all the provided information. {question} ###Assistant:`
 > (无 subtitle 文本。)
+>
+> question/answer 由**固定指令模板**从 CSV 标签生成(`func_get_qa_ovlabel`),不是对话数据——详见下方「位置 2.5 数据→Prompt 包装规则」。
 
 ### batch 输出(`collater` 返回 dict)
 
@@ -96,7 +99,30 @@ multi: face_hidden + audio_hidden --multi_video/audio_embs 升到同一维--> co
 
 ---
 
-## 位置 2.5 — Prompt 设计与训练目标(loss mask)
+## 位置 2.5 — 数据→Prompt 包装规则 与 训练目标(loss mask)
+
+### 数据不是对话数据集,怎么变成训练样本?
+
+原始数据只是 `{name → 情感标签}` 的 CSV,没有对话/QA。通过**固定指令模板**把它包装成
+"单轮指令跟随"样本(`func_get_qa_ovlabel` + `get_prompt_for_multimodal`):
+
+```
+原始 CSV 行:  name="samplenew3_00000058", openset="[concern, pessimism]"
+   ↓ 数据集 annotation:  ovlabel = "concern, pessimism"
+   ↓ 固定模板
+question(固定, 所有样本相同):  "Please recognize all possible emotional states of the character."
+answer(模板+该样本标签):        "The character's emotional state is concern, pessimism."
+   ↓ 再套多模态系统模板
+###Human: ... <Multi><AudioHere><FaceHere> ...
+Please recognize all possible emotional states of the character.
+###Assistant: The character's emotional state is concern, pessimism.###
+```
+
+要点:
+- **问题 100% 固定**,答案 = 固定句式 + 该样本标签 → 模型学到的是"看到 ###Assistant: 就按
+  `The character's emotional state is {labels}.` 格式输出"
+- **不是多轮对话**,是单轮指令跟随(instruction tuning);`###Human:/###Assistant:` 只是模板分隔符
+- 多模态内容以 `<AudioHere>/<FaceHere>/<MultiHere>` 占位 token 进入 prompt,forward 时替换成特征
 
 ### 训练时的完整 prompt(`get_prompt_for_multimodal` 的 `multiface_audio_face` 分支)
 
@@ -152,15 +178,20 @@ labels:      [-100  -100...             -100        | happy, sad |###  <eos>  -1
 | | 内容 |
 |---|---|
 | **输入** | cfg(yaml)+ datasets + model |
-| **输出** | checkpoint 文件 + 训练日志 |
+| **输出** | checkpoint 文件 + 训练日志(log.txt)+ 每轮 val loss + 窗口式生成式 EW-F1 |
 
 - checkpoint:`output/{cfg_name}/{job_id}/checkpoint_{epoch:06d}_loss_{loss}.pth`
   - `cfg_name` = yaml 文件名;`job_id` = `{cfg_name}_{YYYYMMDDHHmm}`(train.py 生成)
-  - 内容:`torch.save(save_obj)`,`save_obj['model']` 为 state_dict
-- 日志:每个 epoch 记录 `loss` / `lr`(`MetricLogger` 输出到 stdout + 日志)
+  - 内容:`torch.save(save_obj)`,`save_obj['model']` 为 state_dict(**只存可训练参数**,~40M)
+  - **每轮都存(不覆盖,60 个全保留)**;窗口验证若 EW-F1 创新高,额外存 `checkpoint_best.pth` + `checkpoint_best_epoch{epoch}.pth`
+- 日志:`MetricLogger` 输出 loss/lr 到 stdout;验证指标写 `output/.../log.txt`
+- **验证设计(窗口式)**:
+  - **每轮**:轻量验证集 CE loss(`eval_val_loss`,不生成,监控收敛)
+  - **每 `eval_interval`(默认 5)轮**:取窗口内 val loss 最低的 epoch → 加载其 checkpoint → 生成式 **EW-F1** → 若创新高存 best → **恢复当前权重继续训练**
+  - 训完可在 test10 上全量扫查所有存下的 checkpoint 挑真正最优(粗选 + 精扫两级选择)
 - 训练协议(见 [`evaluation.md`](evaluation.md)):
-  - SFT:mc+ dedup 31,276 条,60 epoch,init_lr 1e-5,cosine,batch=3×gpu,AMP
-  - GRPO:human train90 1,379 条(待实现)
+  - **SFT**:mc+ train ≈30,976 条,60 epoch,init_lr 1e-5(cosine),batch=3×gpu(2 卡 → 有效 6),LoRA(40.4M)+ Q-Former 对齐模块全量可训,CLIP/HuBERT 冻结,LLM 基座冻结仅 LoRA 可训
+  - **GRPO**:human train90 1,379 条,奖励 = 纯 EW-F1(G=8,temp=1.0,lr=5e-7,eps=0.1,grad_accum=4,500 steps),见 `grpo/train_grpo.py`
 
 ---
 
@@ -236,25 +267,31 @@ EW-F1 = 5 个轮 (case3_wheel1..5) F1 的平均  ← 官方主指标
 
 ```bash
 cd /root/MER2026_Track2
+conda activate mer2026
+export CUDA_HOME=$CONDA_PREFIX   # deepspeed 需要 nvcc
 
-# 0) 一次性: 划分 + 去重
+# 0) 一次性: 划分(test) + 去重 + mc+ 划验证集
 python result/scripts/split_human_data.py
 python result/scripts/dedup_mcplus.py
+python result/scripts/split_mcplus_val.py
 
-# 1) SFT 训练 (mc+ dedup)
-CUDA_VISIBLE_DEVICES=0 python -u train.py \
+# 0.5) 冒烟测试 (可选, ~3min, 确认环境+代码)
+CUDA_VISIBLE_DEVICES=0 python result/scripts/sft_smoke_test.py
+
+# 1) SFT 训练 (2 卡 A100; 每轮 val loss + 每 5 轮窗口式 EW-F1)
+torchrun --nproc_per_node=2 --master_port=29500 train.py \
   --cfg-path=train_configs/mercaptionplus_outputhybird_bestsetup_bestfusion_face_lz.yaml
 
 # 2) 推理 (开发期: 把 config.PATH_TO_LABEL['MER2026OV'] 指向 test10 csv)
 CUDA_VISIBLE_DEVICES=0 python -u inference_hybird.py --zeroshot \
   --dataset='MER2026OV' \
   --cfg-path=train_configs/mercaptionplus_outputhybird_bestsetup_bestfusion_face_lz.yaml \
-  --options "inference.test_epochs=10-60" "inference.skip_epoch=5"
+  --options "inference.test_epochs=10-60" "inference.skip_epoch=1"
 
 # 3) reason → OV 标签
 CUDA_VISIBLE_DEVICES=0 python ovlabel_extraction.py
 
-# 4) EW-F1 评测
+# 4) EW-F1 评测 (全量扫查所有 ckpt 挑最优)
 CUDA_VISIBLE_DEVICES=0 python evaluation.py
 ```
 
