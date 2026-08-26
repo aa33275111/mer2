@@ -27,9 +27,9 @@ model:
   acoustic_encoder: "HUBERT_LARGE" # IMAGEBIND
   visual_encoder: "CLIP_VIT_LARGE" # EVA_CLIP_G
 
-  num_audio_query_token: 1
-  num_video_query_token: 1
-  num_multi_query_token: 1
+  num_audio_query_token: 8
+  num_video_query_token: 32
+  num_multi_query_token: 16
   num_image_query_token: 1
 
   max_length: 1024
