@@ -13,9 +13,9 @@ model:
   frozen_multi_llama_proj: False
   frozen_llm: False
 
-  multi_fusion_type: attention # attention/qformer
-  video_fusion_type: attention # qformer(default)/mean/attention
-  audio_fusion_type: attention # qformer(default)/mean/attention
+  multi_fusion_type: qformer # attention/qformer
+  video_fusion_type: qformer # qformer(default)/mean/attention
+  audio_fusion_type: qformer # qformer(default)/mean/attention
   image_fusion_type: mean       # token(default)/mean
 
   # AffectGPT

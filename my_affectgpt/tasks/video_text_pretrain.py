@@ -27,12 +27,28 @@ class VideoTextPretrainTask(BaseTask):
         self._eval_dataset = None
 
     def before_evaluation(self, model, dataset, **kwargs):
-        self._eval_dataset = dataset
+        # reorg_datasets_by_split 会把每个 split 包装成 list, 这里解包
+        self._eval_dataset = dataset[0] if isinstance(dataset, (list, tuple)) else dataset
         model.before_evaluation(dataset=dataset, task_type=type(self))
 
     def valid_step(self, model, samples):
         loss = model(samples)["loss"]
         return [loss.item()]
+
+    def eval_val_loss(self, model, data_loader, cuda_enabled=True):
+        """每轮轻量验证: 只算验证集 CE loss (不做生成), 用于监控收敛。"""
+        from my_affectgpt.datasets.data_utils import prepare_sample
+        if hasattr(data_loader, 'reset'):
+            data_loader.reset()  # val loader 每轮都要重新迭代
+        model.eval()
+        losses = []
+        with torch.no_grad():
+            for samples in data_loader:
+                samples = prepare_sample(samples, cuda_enabled=cuda_enabled)
+                loss = model(samples)["loss"]
+                losses.append(loss.item())
+        model.train()
+        return float(np.mean(losses)) if losses else 0.0
 
     # ------------------------------------------------------------------ #
     # 生成式 EW-F1 验证 (2026-08-25):

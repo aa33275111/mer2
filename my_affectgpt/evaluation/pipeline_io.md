@@ -70,17 +70,21 @@
 ### 输入(batch samples)
 `input_ids`(含 5 类 patch token)、`labels`、`attention_masks`、`faces/raw_faces`、`audios/raw_audios`。
 
-### 内部特征流(以 attention 融合为例)
+### 内部特征流(**Q-Former 融合**,与配置一致)
 
 ```
-face:  [B,3,8,224,224] --CLIP(ViT-L/14)--> [B,8,768] --attention融合--> [B,768]
-      --affectgpt_proj--> [B,1,llmdim]                     (num_video_query_token=1)
-audio: [B,8,1,128,204] --HuBERT-large--> [B,T,1024] --attention融合--> [B,1024]
-      --audio_llama_proj--> [B,1,llmdim]                    (num_audio_query_token=1)
-multi: 对 face/audio 均值 → multi_video/audio_embs 升到同一维 → concat
-      --attention_mlp + fc_att(2权重)--> 加权融合 [B,maxdim] --multi_llama_proj--> [B,1,llmdim]
+face:  [B,3,8,224,224] --CLIP(ViT-L/14)--> [B,8,768]
+      --Video Q-Former(查询向量交叉注意力)--> [B, num_video_query_token, 768]
+      --affectgpt_proj--> [B,1,llmdim]                          (num_video_query_token=1)
+audio: [B,8,1,128,204] --HuBERT-large--> [B,T,1024]
+      --Audio Q-Former--> [B, num_audio_query_token, 1024]
+      --audio_llama_proj--> [B,1,llmdim]                        (num_audio_query_token=1)
+multi: face_hidden + audio_hidden --multi_video/audio_embs 升到同一维--> concat [B, Ta+Tv, maxdim]
+      --Multi Q-Former--> [B, num_multi_query_token, maxdim]
+      --multi_llama_proj--> [B,1,llmdim]                        (num_multi_query_token=1)
 ```
 
+- **Video/Audio/Multi Q-Former**: 可学习的 query token 对编码器特征做**交叉注意力**,把变长的序列压缩成固定 `num_*_query_token` 个 token(本配置各 =1)
 - llmdim = `llama_model.config.hidden_size`(Qwen2.5-7B = 3584)
 - 把 `inputs_embeds` 里 `<FaceHere>/<AudioHere>/<MultiHere>` 位置替换为对应特征 → 送入 Qwen2.5-7B(**LoRA**,r 可配)自回归
 
@@ -89,6 +93,57 @@ multi: 对 face/audio 均值 → multi_video/audio_embs 升到同一维 → conc
 ```python
 {"loss": loss}   # 标量 CE loss(仅训练用, 面试常问"为什么只有 loss"→ 因为评测走外部 EW-F1)
 ```
+
+---
+
+## 位置 2.5 — Prompt 设计与训练目标(loss mask)
+
+### 训练时的完整 prompt(`get_prompt_for_multimodal` 的 `multiface_audio_face` 分支)
+
+```
+###Human: The audio and video merged info is: <Multi><MultiHere></Multi>.
+The audio content is as follows: <Audio><AudioHere></Audio>.
+Meanwhile, we uniformly sample raw frames from the video and extract faces from these frames: <Video><FaceHere></Video>.
+Now, please answer my question based on all the provided information.
+Please recognize all possible emotional states of the character.
+###Assistant: The character's emotional state is {labels}.###
+```
+
+- `<AudioHere>` / `<FaceHere>` / `<MultiHere>` 是占位 token,forward 时被替换成 HuBERT/CLIP 提取的特征向量(不再是文本)
+- `{labels}` 是训练目标(如 `happy, sad`)
+
+### 哪部分参与计算(loss 只算 answer 段)
+
+token 序列(以单样本为例):
+
+```
+input_ids:  [<bos> ###Human: ...问题 ###Assistant: | happy, sad |###<eos> <pad>...]
+labels:      [-100  -100...             -100        | happy, sad |###  <eos>  -100...]
+                                                       ↑ 只有这段参与 CE loss
+```
+
+- prompt 段、pad 段都是 `-100`(`config.IGNORE_INDEX`),被 mask 掉
+- 自回归:loss = 对 `labels != -100` 的每个 answer token 算 `-log P(next | 之前全部)`,平均
+
+### 为什么 prompt/pad 段 -100、不参与梯度
+
+1. **prompt 段是"条件",不是"预测目标"**:因果 LM 是 `P(next | 之前所有 token)`。prompt(指令 + 多模态特征 + 问题)是**给定输入**,模型要"读"它而不是"复述"它。对 prompt 算 loss 等于逼模型预测自己的输入,无意义还会干扰条件学习。
+2. **基座模型本来就能读懂 prompt**:Qwen2.5-7B 预训练已具备语言/指令理解;多模态 token 的对齐由 **Q-Former + 投影层**完成(这些是训练重点)。prompt 段不学,是"把模型当条件生成器,从 prompt 的 hidden state 出发预测后续"。
+3. **pad 段只是填充 batch 长度**,无信息,算 loss 是纯噪声。
+
+### 固定输出格式是怎么学到的?
+
+- **格式就在 answer 段里,而 answer 段是算 loss 的**。每个训练样本的 target 都是
+  `The character's emotional state is {labels}.###`(监督信号)
+- 模型被训练成:看到 `###Assistant:` 之后,继续输出这种固定格式的句子
+- 格式 delimiter(`###Human:` / `###Assistant:` / `###`)是 answer 段的一部分,模型通过海量样本模仿学会"该在 ###Assistant: 后输出情感标签、遇到 ### 结束"
+- 一句话:**prompt 格式是"给的"(masked),输出格式是"学的"(lossed)**
+
+### 推理时
+
+- 只输入 prompt(到 `###Assistant:` 为止),占位 token 换成特征
+- `llama_model.generate(...)` 自回归生成 answer(采样或贪心)
+- 生成文本(如 `The character's emotional state is happy, sad`)→ 后续 OV 标签抽取 → 与 GT 算 EW-F1
 
 ---
 

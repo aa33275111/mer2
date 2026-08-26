@@ -41,7 +41,7 @@ class Blip2Base(BaseModel):
         if enable_autocast:
             if torch.__version__.startswith('2.4.0') or torch.__version__.startswith('2.6.0'):
                 return torch.amp.autocast('cuda', dtype=dtype)
-            elif torch.__version__.startswith('2.1.0'):
+            elif torch.__version__.startswith('2.1'):
                 return torch.cuda.amp.autocast(dtype=dtype)
             else:
                 assert 1==0, f'unsupport torch version'

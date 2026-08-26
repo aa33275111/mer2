@@ -86,13 +86,13 @@ class AffectGPT(Blip2Base):
         if llama_model_name in ['Baichuan2']:
             self.llama_model = AutoModelForCausalLM.from_pretrained(
                 config.PATH_TO_LLM[llama_model_name],
-                torch_dtype=torch.float16,
+                torch_dtype=torch.float32,
                 trust_remote_code=True
             )
         else:
             self.llama_model = AutoModelForCausalLM.from_pretrained(
                 config.PATH_TO_LLM[llama_model_name],
-                torch_dtype=torch.float16
+                torch_dtype=torch.float32
             )
 
         for name, param in self.llama_model.named_parameters():

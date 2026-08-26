@@ -62,6 +62,7 @@ class RunnerBase:
         self._scaler = None
         self._dataloaders = None
         self._lr_sched = None
+        self._val_loss_history = {}  # 2026-08-25: epoch -> val loss, 窗口内选最优候选用
 
         self.start_epoch = 0
 
@@ -151,7 +152,7 @@ class RunnerBase:
             if self._scaler is None:
                 if torch.__version__.startswith('2.4.0') or torch.__version__.startswith('2.6.0'):
                     self._scaler = torch.amp.GradScaler('cuda')
-                elif torch.__version__.startswith('2.1.0'):
+                elif torch.__version__.startswith('2.1'):
                     self._scaler = torch.cuda.amp.GradScaler()
                 else:
                     assert 1==0, f'unsupport torch version'
@@ -401,29 +402,50 @@ class RunnerBase:
             if not self.evaluate_only:
                 self._save_checkpoint(cur_epoch, train_stats, is_best=False)
 
-            # evaluation phase: 每 eval_interval 轮做一次生成式 EW-F1 验证, 选最优
+            # 每轮: 轻量验证集 CE loss (不生成), 记录到窗口历史
+            if len(self.valid_splits) > 0 and not self.evaluate_only:
+                for split_name in self.valid_splits:
+                    val_loader = self.dataloaders.get(split_name, None)
+                    if val_loader is not None:
+                        val_loss = self.task.eval_val_loss(self.unwrap_dist_model(self.model), val_loader)
+                        self._val_loss_history[cur_epoch] = val_loss
+                        logging.info("Epoch {} {} val_loss: {:.4f}".format(cur_epoch, split_name, val_loss))
+
+            # evaluation phase: 每 eval_interval 轮, 对窗口内 val loss 最低的 epoch 做生成式 EW-F1
             eval_interval = self.config.run_cfg.get("eval_interval", 1)
             if len(self.valid_splits) > 0 and cur_epoch % eval_interval == 0:
+                window = [e for e in range(cur_epoch - eval_interval + 1, cur_epoch + 1)
+                          if e in self._val_loss_history]
                 for split_name in self.valid_splits:
-                    logging.info("Evaluating on {}.".format(split_name))
+                    if not window:
+                        continue
+                    # 窗口内 val loss 最低的 epoch 作为候选
+                    cand_epoch = min(window, key=lambda e: self._val_loss_history[e])
+                    logging.info("Window [{}-{}] lowest val_loss epoch={}, validate EW-F1.".format(
+                        cur_epoch - eval_interval + 1, cur_epoch, cand_epoch))
 
-                    val_log = self.eval_epoch(
-                        split_name=split_name, cur_epoch=cur_epoch
-                    )
-                    if val_log is not None:
-                        if is_main_process():
-                            assert (
-                                "agg_metrics" in val_log
-                            ), "No agg_metrics found in validation log."
+                    model = self.unwrap_dist_model(self.model)
+                    current_ckpt = self._epoch_ckpt_path(cur_epoch)
+                    if cand_epoch != cur_epoch:
+                        cand_ckpt = self._epoch_ckpt_path(cand_epoch)
+                        assert cand_ckpt and current_ckpt, "candidate/current checkpoint missing"
+                        model = self._reload_checkpoint(model, cand_ckpt)
 
-                            agg_metrics = val_log["agg_metrics"]
-                            if agg_metrics > best_agg_metric and split_name == "val":
-                                best_epoch, best_agg_metric = cur_epoch, agg_metrics
+                    val_log = self.eval_epoch(split_name=split_name, cur_epoch=cand_epoch)
 
-                                self._save_checkpoint(cur_epoch, is_best=True)
+                    # 此刻模型正好是 cand_epoch 权重, 若是新最优直接存 best
+                    if val_log is not None and is_main_process():
+                        assert "agg_metrics" in val_log, "No agg_metrics found in validation log."
+                        agg_metrics = val_log["agg_metrics"]
+                        if agg_metrics > best_agg_metric:
+                            best_epoch, best_agg_metric = cand_epoch, agg_metrics
+                            self._save_checkpoint(cand_epoch, is_best=True)
+                        val_log.update({"best_epoch": best_epoch})
+                        self.log_stats(val_log, split_name)
 
-                            val_log.update({"best_epoch": best_epoch})
-                            self.log_stats(val_log, split_name)
+                    # 恢复当前 epoch 权重, 继续训练
+                    if cand_epoch != cur_epoch:
+                        self._reload_checkpoint(model, current_ckpt)
 
             if self.evaluate_only:
                 break
@@ -636,12 +658,8 @@ class RunnerBase:
         # model_no_ddp.llama_tokenizer.save_pretrained(save_to)
 
 
-    def _reload_best_model(self, model):
-        """
-        Load the best checkpoint for evaluation.
-        """
-        checkpoint_path = os.path.join(self.output_dir, "checkpoint_best.pth")
-
+    def _reload_checkpoint(self, model, checkpoint_path):
+        """把指定 checkpoint 的权重加载进 model (兼容只存部分参数的 ckpt)。"""
         logging.info("Loading checkpoint from {}.".format(checkpoint_path))
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         try:
@@ -655,6 +673,19 @@ class RunnerBase:
             )
             model.load_state_dict(checkpoint["model"], strict=False)
         return model
+
+    def _reload_best_model(self, model):
+        """
+        Load the best checkpoint for evaluation.
+        """
+        checkpoint_path = os.path.join(self.output_dir, "checkpoint_best.pth")
+        return self._reload_checkpoint(model, checkpoint_path)
+
+    def _epoch_ckpt_path(self, epoch):
+        """按 epoch 前缀定位该轮保存的 checkpoint 文件 (命名含 loss)。"""
+        import glob as _glob
+        matches = _glob.glob(os.path.join(self.output_dir, "checkpoint_%06d_loss_*.pth" % epoch))
+        return matches[0] if matches else None
 
     def _load_checkpoint(self, url_or_filename):
         """

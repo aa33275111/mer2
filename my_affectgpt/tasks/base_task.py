@@ -151,7 +151,7 @@ class BaseTask:
             if torch.__version__.startswith('2.4.0') or torch.__version__.startswith('2.6.0'):
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     loss = self.train_step(model=model, samples=samples)
-            elif torch.__version__.startswith('2.1.0'):
+            elif torch.__version__.startswith('2.1'):
                 with torch.cuda.amp.autocast(enabled=use_amp):
                     loss = self.train_step(model=model, samples=samples)
             else:

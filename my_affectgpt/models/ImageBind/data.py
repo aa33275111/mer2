@@ -12,9 +12,20 @@ import torch
 import torch.nn as nn
 import torchaudio
 from PIL import Image
-from pytorchvideo import transforms as pv_transforms
-from pytorchvideo.data.clip_sampling import ConstantClipsPerVideoSampler
-from pytorchvideo.data.encoded_video import EncodedVideo
+## 2026-08-25: pytorchvideo 与本机 torchvision 0.18 不兼容 (functional_tensor 已移除);
+## 本管线只用 load_audio/transform_audio (torchaudio), 不经过 pytorchvideo, 故容错导入。
+try:
+    from pytorchvideo import transforms as pv_transforms
+    from pytorchvideo.data.clip_sampling import ConstantClipsPerVideoSampler
+    from pytorchvideo.data.encoded_video import EncodedVideo
+    _PV_OK = True
+except Exception as _e:  # pragma: no cover
+    print(f"[WARN] pytorchvideo 不可用: {_e}")
+    pv_transforms = None
+    ConstantClipsPerVideoSampler = None
+    EncodedVideo = None
+    _PV_OK = False
+
 from torchvision import transforms
 from torchvision.transforms._transforms_video import NormalizeVideo
 
@@ -366,6 +377,8 @@ def load_and_transform_video_data(
     clips_per_video=5,
     sample_rate=16000,
 ):
+    if not _PV_OK:  # pragma: no cover
+        raise RuntimeError("pytorchvideo 不可用 (本管线用 decord 加载视频, 不走此函数)")
     if video_paths is None:
         return None
 

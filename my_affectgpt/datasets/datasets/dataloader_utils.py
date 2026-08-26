@@ -37,6 +37,15 @@ class MultiIterLoader:
         self.loaders = loaders
         self.ratios = ratios
 
+    def reset(self):
+        """重置所有子 loader, 支持每轮重新迭代 (val loss 每轮都要跑)。"""
+        for loader in self.loaders:
+            if hasattr(loader, 'reset'):
+                loader.reset()
+
+    def __iter__(self):
+        return self
+
     def __next__(self):
         # each iter: random choose a dataloader
         loader_idx = random.choices(range(len(self.loaders)), self.ratios, k=1)[0]
@@ -96,8 +105,22 @@ class PrefetchLoader(object):
     def __init__(self, loader):
         self.loader = loader
         self.stream = torch.cuda.Stream()
+        self._it = None  # 2026-08-25: 支持 __next__ (MultiIterLoader 断言需要)
 
     def __iter__(self):
+        self._it = None  # 每次 iter() 重新开始, 支持每轮重新迭代 (val loss 每轮都要跑)
+        return self
+
+    def reset(self):
+        """手动重置迭代状态, 支持每轮重新计算 val loss。"""
+        self._it = None
+
+    def __next__(self):
+        if self._it is None:
+            self._it = self._make_iterator()
+        return next(self._it)
+
+    def _make_iterator(self):
         loader_it = iter(self.loader) # DataLoader class
         self.preload(loader_it) # preload self.batch [从 loader_it 中预先抽取一个 self.batch]
         batch = self.next(loader_it)
@@ -105,11 +128,7 @@ class PrefetchLoader(object):
             is_tuple = isinstance(batch, tuple)
             if is_tuple:
                 task, batch = batch
-
-            if is_tuple:
-                yield task, batch
-            else:
-                yield batch
+            yield (task, batch) if is_tuple else batch
             batch = self.next(loader_it)
 
     def __len__(self):
