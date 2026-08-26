@@ -45,7 +45,7 @@ class AffectGPT(Blip2Base):
         frozen_video_Qformer,
         frozen_audio_Qformer,
         frozen_audio_proj,
-        frozen_llm,
+        frozen_lora,
         lora_r,
         num_video_query_token,
         num_audio_query_token,
@@ -118,7 +118,7 @@ class AffectGPT(Blip2Base):
                                     target_modules=target_modules)
         self.llama_model = get_peft_model(self.llama_model, peft_config)
         
-        if frozen_llm:
+        if frozen_lora:
             for param in self.llama_model.parameters(): # lora 部分也冻结
                 param.requires_grad = False
             print('freeze: LLAMA Model')
@@ -778,7 +778,7 @@ class AffectGPT(Blip2Base):
         frozen_audio_proj = cfg.get("frozen_audio_proj", False)
         frozen_multi_Qformer    = cfg.get("frozen_multi_Qformer", False)
         frozen_multi_llama_proj = cfg.get("frozen_multi_llama_proj", False)
-        frozen_llm = cfg.get("frozen_llm", False)
+        frozen_lora = cfg.get("frozen_lora", cfg.get("frozen_llm", False))  # frozen_llm 为旧名, 向后兼容
         lora_r = cfg.get("lora_r", 16)
 
         # 这几个参数是默认的
@@ -797,7 +797,7 @@ class AffectGPT(Blip2Base):
             frozen_video_Qformer=frozen_video_Qformer,
             frozen_audio_Qformer=frozen_audio_Qformer,
             frozen_multi_Qformer=frozen_multi_Qformer,
-            frozen_llm=frozen_llm,
+            frozen_lora=frozen_lora,
             lora_r=lora_r,
             num_video_query_token=num_video_query_token,
             num_audio_query_token=num_audio_query_token,

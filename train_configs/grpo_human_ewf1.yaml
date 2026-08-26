@@ -15,7 +15,7 @@ model:
   frozen_audio_proj: False
   frozen_multi_Qformer: False
   frozen_multi_llama_proj: False
-  frozen_llm: False
+  frozen_lora: False
 
   multi_fusion_type: qformer # attention/qformer
   video_fusion_type: qformer # qformer(default)/mean/attention
