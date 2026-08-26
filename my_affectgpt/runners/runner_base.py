@@ -410,6 +410,7 @@ class RunnerBase:
                         val_loss = self.task.eval_val_loss(self.unwrap_dist_model(self.model), val_loader)
                         self._val_loss_history[cur_epoch] = val_loss
                         logging.info("Epoch {} {} val_loss: {:.4f}".format(cur_epoch, split_name, val_loss))
+                        self.log_stats({"val_loss": val_loss}, split_name)  # 写进 log.txt 供监控
 
             # evaluation phase: 每 eval_interval 轮, 对窗口内 val loss 最低的 epoch 做生成式 EW-F1
             eval_interval = self.config.run_cfg.get("eval_interval", 1)
